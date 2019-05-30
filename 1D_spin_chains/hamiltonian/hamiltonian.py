@@ -2,13 +2,14 @@
 A module that implements the
 hamiltonian class which constructs
 the model hamiltonian from a given
-set of input parameters.
+set of input parameters.g
 
 """
 
 import numpy as np
 import scipy as sp
 from scipy import sparse as ssp
+import functools
 
 import ham_ops
 
@@ -16,7 +17,67 @@ import ham_ops
 _ops = ham_ops.operators
 
 
-class hamiltonian(object):
+class decorators_mixin(object):
+    """
+    A mixin class for decorators which
+    are mainly used for input checking.
+
+    """
+
+    @classmethod
+    def check_ham_lists(cls, decorated):
+        """
+        A decorator for checking whether
+        the static and dynamic lists provided
+        are of the proper shape and if the
+        input is ok.
+
+        """
+        @functools.wraps(decorated)
+        def wrap_check_ham_lists(*args):
+
+            ham_list = args[1]
+            for term in ham_list:
+
+                # operator descriptions and coupling lists
+                op_desc, coups = term
+                # check if the operator descriptors are ok
+                if not isinstance(op_desc, str):
+                    raise TypeError(('Operator descriptor {} should'
+                                     'be a string!').format(op_desc))
+
+                # correct all preceeding/trailing whitespaces, if needed
+                term[0] = op_desc.strip('')
+
+                # number of interacting spins in the hamiltonian term
+                n_inter = len(list(term[0]))
+
+                # check if the entries in the operator descriptor list are ok
+                if not set(list(op_desc)).issubset(_ops.keys()):
+                    raise ValueError(('Operator descriptor {}'
+                                      ' contains invalid entries.'
+                                      ' Allowed values: {}'
+                                      ).format(op_desc, list(_ops.keys())))
+
+                coups = np.array(coups)
+
+                if coups[:, 1:].shape[1] != n_inter:
+                    raise ValueError(('Number of sites in '
+                                      'the site-coupling list '
+                                      'should match the number of terms '
+                                      'in the operator descriptor string!'))
+
+                # sort sites in the site coupling list
+                # coups[:, 1:] = np.sort(coups[:, 1:], axis=1)
+                term[1] = coups
+
+            res = decorated(*args)
+            return res
+
+        return wrap_check_ham_lists
+
+
+class hamiltonian(decorators_mixin):
     """
     Creates a class which constructs the
     spin chain hamiltonian.
@@ -27,7 +88,7 @@ class hamiltonian(object):
     L: int
         An integer specifying the spin chain length.
 
-    static_ham: list
+    static_list: list
         A nested list of the operator description strings
         and site-coupling lists for the time-independent
         part of the Hamiltonian. An example of the
@@ -49,7 +110,7 @@ class hamiltonian(object):
         template which should allow for simple extension to
         the case of n-spin interaction and varying couplings.
 
-    dynamic_ham: list
+    dynamic_list: list
         A nested list of the operator description strings. The
         description is similar to the static_ham description,
         however, additional terms are needed to incorporate
@@ -65,17 +126,21 @@ class hamiltonian(object):
         interface: time_fun(t, *time_fun_args) where time_fun_args
         are the possible additional arguments of the time-dependence.
 
-
+    Nu: {int, None}
+        Number of up spins, relevant for the hamiltonians where the
+        total spin z projection is a conserved quantity. Defaults to
+        None.
 
 
     """
 
-    def __init__(self, L, static_ham, dynamic_ham, Nu=None):
+    def __init__(self, L, static_list, dynamic_list, t=0, Nu=None):
         super(hamiltonian, self).__init__()
 
         self.L = L
-        self.static = static_ham
-        self.dynamic = dynamic_ham
+        self.static_list = static_list
+        self.dynamic_list = dynamic_list
+        self.Nu = Nu
 
     @property
     def L(self):
@@ -91,58 +156,66 @@ class hamiltonian(object):
         self._L = L
 
     @property
-    def static(self):
+    def num_states(self):
 
-        return self._static
+        return 1 << self.L
 
-    @static.setter
-    def static(self, static_ham):
+    @property
+    def Nu(self):
+
+        return self._Nu
+
+    @Nu.setter
+    def Nu(self, Nu):
+        if Nu is None:
+            Nu_list = None
+        elif type(Nu) is int:
+            Nu_list = [Nu]
+        else:
+            try:
+                Nu_list = list(Nu)
+            except TypeError:
+                raise TypeError(("Nf must be an"
+                                 "iterable returning integers!"))
+
+            if any((type(Nu) is not int) for Nu in Nu_list):
+                raise TypeError("Nf must be iterable returning integers")
+            if any(((Nu < 0) or (Nu >= self.L)) for Nu in Nu_list):
+                raise ValueError("Nf cannot be greater than L or smaller than "
+                                 "zero!")
+            if len(Nu_list) != len(set(Nu_list)):
+                raise ValueError(("There must be no duplicates"
+                                  " in a list of Nf values!"))
+        self._Nu = Nu_list
+
+    @property
+    def static_list(self):
+
+        return self._static_list
+
+    @static_list.setter
+    @decorators_mixin.check_ham_lists
+    def static_list(self, static_list):
         """
         Perform checking on the shapes and values
         of the static_ham input nested list.
 
+        INPUT:
+
+        static_ham: list
+            A nested list of the operator description
+            strings and site-coupling lists for the
+            time-independent part of the Hamiltonian.
+            See class' docstring for more details.
+
         """
-
-        for term in static_ham:
-
-            # operator descriptions and coupling lists
-            op_desc, coups = term
-
-            # check if the operator descriptors are ok
-            if not isinstance(op_desc, str):
-                raise TypeError(('Operator descriptor {} should'
-                                 'be a string!').format(op_desc))
-
-            # correct all preceeding/trailing whitespaces, if needed
-            term[0] = op_desc.strip('')
-
-            # number of interacting spins in the hamiltonian term
-            n_inter = len(list(term[0]))
-
-            # check if the entries in the operator descriptor list are ok
-            if not set(list(op_desc)).issubset(_ops.keys()):
-                raise ValueError(('Operator descriptor {}'
-                                  ' contains invalid entries.'
-                                  ' Allowed values: {}'
-                                  ).format(op_desc, list(_ops.keys())))
-
-            coups = np.array(coups)
-
-            if coups[:, 1:].shape[1] != n_inter:
-                raise ValueError(('Number of sites in '
-                                  'the site-coupling list '
-                                  'should match the number of terms '
-                                  'in the operator descriptor string!'))
-
-            coups[:, 1:] = np.sort(coups[:, 1:], axis=1)
-            term[1] = coups
-
-        self._static = static_ham
+        self._static_list = static_list
 
     # build the hamiltonian
-    def _build_hamiltonian(self):
+    @property
+    def _ham_stat(self):
         """
-        Build the entire hamiltonian from the static
+        Build the entire (static) hamiltonian from the static
         list.
 
         The idea of this code is to build the entire
@@ -165,16 +238,28 @@ class hamiltonian(object):
         Hilbert space and we have enumerated the states
         according to python's indexing (0, 1, ... , L - 1)
 
+        Returns
+        -------
+
+        ham_static: dict
+            A dict of key-value pairs where keys are
+            the operator descriptor strings and values
+            are the hamiltonian terms
+
         """
 
-        # the dimensionality of the default placeholder
-        # Hamiltonian must match the Hilbert space dimension
-        # which scales exponentially with system size as 2 ** L
-        ham = 0 * ssp.eye(2 ** self.L)
+        # initialize an empty dict
+        ham_static = {}
 
         # iterate over different hamiltonian
         # terms in the static list
-        for ham_term in self.static:
+        for ham_term in self.static_list:
+
+            static_key = ham_term[0]
+            # the dimensionality of the default placeholder
+            # Hamiltonian must match the Hilbert space dimension
+            # which scales exponentially with system size as 2 ** L
+            ham = 0 * ssp.eye(2 ** self.L)
 
             # which operators comprise the
             # given Hamiltonian term
@@ -190,8 +275,14 @@ class hamiltonian(object):
                 # the remaining entries of the coupling
                 # array are the sites with nontrivial
                 # (non-identity) operators
-                sites = coupling[1:]
-
+                sites = np.sort(coupling[1:])
+                # in the case of pbc, one needs to
+                # take care of the operator ordering
+                # if the operators "wrap around",
+                # one needs to consider this and
+                # properly reorder the operator
+                # descriptor string list
+                sites_sorted = np.argsort(coupling[1:])
                 # determine the dimensionalities of the
                 # intermediate identity operators which
                 # 'act' between the spin operators at
@@ -215,7 +306,7 @@ class hamiltonian(object):
 
                     # an iterative step term -> consisting
                     # of an identity matrix and an operator
-                    temp_ = ssp.kron(eye, _ops[op_strings[i]])
+                    temp_ = ssp.kron(eye, _ops[op_strings[sites_sorted[i]]])
 
                     # update the temporary kronecker product array
                     # with the new term
@@ -225,4 +316,53 @@ class hamiltonian(object):
 
                 ham += temp * exchange
 
-            self.ham = ham
+            if static_key in ham_static.keys():
+                static_key = static_key + '_'
+            ham_static[static_key] = ham
+
+        return ham_static
+
+    @property
+    def dynamic_list(self):
+
+        return self._dynamic_list
+
+    @dynamic_list.setter
+    @decorators_mixin.check_ham_lists
+    def dynamic_list(self, dynamic_list):
+        """
+        Perform checking on the shapes and values
+        of the dynamic_ham input nested list.
+
+        INPUT:
+
+        dynamic_ham: list
+            A nested list of the operator description
+            strings and site-coupling lists for the
+            time-independent part of the Hamiltonian.
+            See class' docstring for more details.
+
+        """
+        self._dynamic_list = dynamic_list
+
+    @property
+    def ham(self):
+
+        ham = 0
+
+        for value in self._ham_stat.values():
+
+            ham += value
+
+        return ham
+
+    # @property
+    # def dynamic(self):
+
+    #     return self._dynamic
+
+    # @dynamic.setter
+    # def dynamic(self, dynamic_ham):
+
+
+
