@@ -247,7 +247,6 @@ class hamiltonian(decorators_mixin):
             are the hamiltonian terms
 
         """
-
         # initialize an empty dict
         ham_static = {}
 
@@ -347,15 +346,16 @@ class hamiltonian(decorators_mixin):
 
     @property
     def ham(self):
-
+        print('Please wait, building the Hamiltonian ...')
         ham = 0
 
         for value in self._ham_stat.values():
 
             ham += value
 
+        print('Building the Hamiltonian finished!')
         return ham
-        
+
     # @property
     # def dynamic(self):
 
@@ -363,6 +363,3 @@ class hamiltonian(decorators_mixin):
 
     # @dynamic.setter
     # def dynamic(self, dynamic_ham):
-
-
-
