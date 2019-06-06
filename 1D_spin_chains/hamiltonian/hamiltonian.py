@@ -355,7 +355,7 @@ class hamiltonian(decorators_mixin):
             ham += value
 
         return ham
-
+        
     # @property
     # def dynamic(self):
 
