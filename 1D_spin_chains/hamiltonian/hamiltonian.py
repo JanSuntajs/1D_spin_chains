@@ -11,8 +11,9 @@ import scipy as sp
 from scipy import sparse as ssp
 import functools
 
-import ham_ops
 
+from . import ham_ops
+from .construct_ops import operators_mixin
 
 _ops = ham_ops.operators
 
@@ -77,7 +78,8 @@ class decorators_mixin(object):
         return wrap_check_ham_lists
 
 
-class hamiltonian(decorators_mixin):
+
+class hamiltonian(decorators_mixin, operators_mixin):
     """
     Creates a class which constructs the
     spin chain hamiltonian.
@@ -260,60 +262,12 @@ class hamiltonian(decorators_mixin):
             # which scales exponentially with system size as 2 ** L
             ham = 0 * ssp.eye(2 ** self.L)
 
-            # which operators comprise the
-            # given Hamiltonian term
-            op_strings = list(ham_term[0])
             # coupling constants and sites
             couplings = ham_term[1]
 
             for coupling in couplings:
 
-                # first entry of the coupling array
-                # is the exchange constant
-                exchange = coupling[0]
-                # the remaining entries of the coupling
-                # array are the sites with nontrivial
-                # (non-identity) operators
-                sites = np.sort(coupling[1:])
-                # in the case of pbc, one needs to
-                # take care of the operator ordering
-                # if the operators "wrap around",
-                # one needs to consider this and
-                # properly reorder the operator
-                # descriptor string list
-                sites_sorted = np.argsort(coupling[1:])
-                # determine the dimensionalities of the
-                # intermediate identity operators which
-                # 'act' between the spin operators at
-                # specified sites
-                dims = np.diff(sites) - 1
-                # make sure that boundary cases are also
-                # properly considered
-                dims = np.insert(dims, 0, sites[0])
-                dims = np.append(dims, self.L - 1 - sites[-1])
-
-                # create the intermediate identity matrices
-                eyes = [ssp.eye(2 ** dim) for dim in dims]
-                # NOTE: the above construction ensures that the
-                # cases where nontrivial operators are not present
-                # at the edge sites are also properly considered
-
-                # now the actual hamiltonian construction
-                # temporary kronecker product matrix
-                temp = ssp.eye(1)  # defaults to an identity
-                for i, eye in enumerate(eyes[:-1]):
-
-                    # an iterative step term -> consisting
-                    # of an identity matrix and an operator
-                    temp_ = ssp.kron(eye, _ops[op_strings[sites_sorted[i]]])
-
-                    # update the temporary kronecker product array
-                    # with the new term
-                    temp = ssp.kron(temp, temp_)
-
-                temp = ssp.kron(temp, eyes[-1])
-
-                ham += temp * exchange
+                ham += self.make_op(ham_term[0], coupling)
 
             if static_key in ham_static.keys():
                 static_key = static_key + '_'
@@ -363,3 +317,4 @@ class hamiltonian(decorators_mixin):
 
     # @dynamic.setter
     # def dynamic(self, dynamic_ham):
+
