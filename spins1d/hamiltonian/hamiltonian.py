@@ -7,7 +7,7 @@ set of input parameters.g
 """
 
 import numpy as np
-import scipy as sp
+from scipy import linalg as sla
 from scipy import sparse as ssp
 import functools
 
@@ -78,7 +78,6 @@ class decorators_mixin(object):
         return wrap_check_ham_lists
 
 
-
 class hamiltonian(decorators_mixin, operators_mixin):
     """
     Creates a class which constructs the
@@ -140,8 +139,13 @@ class hamiltonian(decorators_mixin, operators_mixin):
         super(hamiltonian, self).__init__()
 
         self.L = L
+
+        self._static_changed = False
+
         self.static_list = static_list
         self.dynamic_list = dynamic_list
+        self.build_mat()
+
         self.Nu = Nu
 
     @property
@@ -211,11 +215,13 @@ class hamiltonian(decorators_mixin, operators_mixin):
             See class' docstring for more details.
 
         """
-        self._static_list = static_list
 
-    # build the hamiltonian
-    @property
-    def _ham_stat(self):
+        self._static_list = static_list
+        self._static_changed = True
+
+    # build the hamiltonian matrix
+    def build_mat(self):
+        # def _ham_stat(self):
         """
         Build the entire (static) hamiltonian from the static
         list.
@@ -252,28 +258,36 @@ class hamiltonian(decorators_mixin, operators_mixin):
         # initialize an empty dict
         ham_static = {}
 
-        # iterate over different hamiltonian
-        # terms in the static list
-        for ham_term in self.static_list:
+        if self._static_changed:
+            # if the static_list has changed,
+            # rebuild the static hamiltonian
+            # dict.
 
-            static_key = ham_term[0]
-            # the dimensionality of the default placeholder
-            # Hamiltonian must match the Hilbert space dimension
-            # which scales exponentially with system size as 2 ** L
-            ham = 0 * ssp.eye(2 ** self.L)
+            # iterate over different hamiltonian
+            # terms in the static list
+            for ham_term in self.static_list:
 
-            # coupling constants and sites
-            couplings = ham_term[1]
+                static_key = ham_term[0]
+                # the dimensionality of the default placeholder
+                # Hamiltonian must match the Hilbert space dimension
+                # which scales exponentially with system size as 2 ** L
+                ham = 0 * ssp.eye(2 ** self.L)
 
-            for coupling in couplings:
+                # coupling constants and sites
+                couplings = ham_term[1]
 
-                ham += self.make_op(ham_term[0], coupling)
+                for coupling in couplings:
 
-            if static_key in ham_static.keys():
-                static_key = static_key + '_'
-            ham_static[static_key] = ham
+                    ham += self.make_op(ham_term[0], coupling)
 
-        return ham_static
+                if static_key in ham_static.keys():
+                    static_key = static_key + '_'
+                ham_static[static_key] = ham
+
+            self._static_changed = False
+            self._mat_static = ham_static
+
+            self._matsum()
 
     @property
     def dynamic_list(self):
@@ -298,18 +312,36 @@ class hamiltonian(decorators_mixin, operators_mixin):
         """
         self._dynamic_list = dynamic_list
 
-    @property
-    def ham(self):
+    def _matsum(self):
+        """
+        Construct the hamiltonian
+        matrix -> sum the entries
+        in the _ham_stat dict.
+
+        """
         print('Please wait, building the Hamiltonian ...')
-        ham = 0
+        mat = 0
 
-        for value in self._ham_stat.values():
+        for value in self._mat_static.values():
 
-            ham += value
+            mat += value
 
         print('Building the Hamiltonian finished!')
-        return ham
 
+        self._mat = mat
+        # return mat
+
+    @property
+    def mat(self):
+
+        if self._static_changed:
+            self.build_mat()
+
+        return self._mat
+
+    def eigvals(self, *args, **kwargs):
+
+        return sla.eigvalsh(self.mat.todense(), *args, **kwargs)
     # @property
     # def dynamic(self):
 
@@ -317,4 +349,3 @@ class hamiltonian(decorators_mixin, operators_mixin):
 
     # @dynamic.setter
     # def dynamic(self, dynamic_ham):
-
