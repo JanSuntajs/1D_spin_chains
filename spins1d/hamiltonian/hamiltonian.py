@@ -342,6 +342,7 @@ class hamiltonian(decorators_mixin, operators_mixin):
     def eigvals(self, *args, **kwargs):
 
         return sla.eigvalsh(self.mat.todense(), *args, **kwargs)
+
     # @property
     # def dynamic(self):
 
